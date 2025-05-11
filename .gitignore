@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Data
+data/raw/
+data/processed/
+*.dcm
+*.nii.gz
+deeplesion/train/train_640geo
+deeplesion/test/test_640geo
+results/deeplesion
+save_results
+
+# Models
+models/*.pth
+models/*.h5
+models/*.pt
+models_default_mask/
+# Logs
+logs/
+outputs/
+
+# Environments
+venv/
+.env
+
+# IDE
+.idea/
+.vscode/
+
+astra-toolbox/
+odl/

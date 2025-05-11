@@ -69,6 +69,7 @@ def normalize(data, minmax):
     data = np.transpose(np.expand_dims(data, 2), (2, 0, 1))
     return data
 
+
 class MARTrainDataset(udata.Dataset):
     def __init__(self, dir, patchSize, mask):
         super().__init__()
@@ -76,43 +77,81 @@ class MARTrainDataset(udata.Dataset):
         self.train_mask = mask
         self.patch_size = patchSize
         self.txtdir = os.path.join(self.dir, 'train_640geo_dir.txt')
-        self.mat_files = open(self.txtdir, 'r').readlines()
+        self.mat_files = self._load_valid_files()
         self.rand_state = RandomState(66)
+
+    def _load_valid_files(self):
+        valid_files = []
+        original_files = [f.strip() for f in open(self.txtdir, 'r').readlines()]
+
+        for f in original_files:
+            gt_path = os.path.join(self.dir, 'train_640geo', f)
+            try:
+                # Validate ground truth file
+                with h5py.File(gt_path, 'r') as test_file:
+                    if 'image' not in test_file:
+                        raise KeyError(f"Missing 'image' dataset in {gt_path}")
+                valid_files.append(f)
+            except (OSError, KeyError) as e:
+                print(f"Excluding corrupted file: {gt_path} - {str(e)}")
+
+        return valid_files
+
     def __len__(self):
         return len(self.mat_files)
 
     def __getitem__(self, idx):
-        gt_dir = self.mat_files[idx]
-      #  random_mask = random.randint(0, 89)  # include 89
-        random_mask = random.randint(0, 9)  # for demo
-        file_dir = gt_dir[:-6]
-        data_file = file_dir + str(random_mask) + '.h5'
-        abs_dir = os.path.join(self.dir, 'train_640geo/', data_file)
-        gt_absdir = os.path.join(self.dir,'train_640geo/', gt_dir[:-1])
-        gt_file = h5py.File(gt_absdir, 'r')
-        Xgt = gt_file['image'][()]
-        gt_file.close()
-        file = h5py.File(abs_dir, 'r')
-        Xma= file['ma_CT'][()]
-        Sma = file['ma_sinogram'][()]
-        XLI =file['LI_CT'][()]
-        SLI = file['LI_sinogram'][()]
-        Tr = file['metal_trace'][()]
-        file.close()
-        Sgt = np.asarray(ray_trafo(Xgt))
-        M512 = self.train_mask[:,:,random_mask]
-        M = np.array(Image.fromarray(M512).resize((416, 416), PIL.Image.BILINEAR))
-        Xprior = nmar_prior(XLI, M)
-        Xprior = normalize(Xprior, image_get_minmax())  # *255
-        Xma = normalize(Xma, image_get_minmax())
-        Xgt = normalize(Xgt, image_get_minmax())
-        XLI = normalize(XLI, image_get_minmax())
-        Sma = normalize(Sma, proj_get_minmax())
-        Sgt = normalize(Sgt, proj_get_minmax())
-        SLI = normalize(SLI, proj_get_minmax())
-        Tr = 1 -Tr.astype(np.float32)
-        Tr = np.transpose(np.expand_dims(Tr, 2), (2, 0, 1))
-        Mask = M.astype(np.float32)
-        Mask = np.transpose(np.expand_dims(Mask, 2), (2, 0, 1))
-        return torch.Tensor(Xma), torch.Tensor(XLI), torch.Tensor(Xgt), torch.Tensor(Mask), \
-               torch.Tensor(Sma), torch.Tensor(SLI), torch.Tensor(Sgt), torch.Tensor(Tr), torch.Tensor(Xprior)
+        for attempt in range(10):  # Max 10 attempts per item
+            try:
+                gt_dir = self.mat_files[idx]
+                random_mask = random.randint(0, 89)
+
+                # Build proper file paths
+                file_dir = os.path.dirname(gt_dir)
+                data_file = f"{random_mask}.h5"  # No zero-padding
+                abs_dir = os.path.join(self.dir, 'train_640geo', file_dir, data_file)
+                gt_absdir = os.path.join(self.dir, 'train_640geo', gt_dir)
+
+                # Load data with explicit checks
+                with h5py.File(gt_absdir, 'r') as gt_file:
+                    Xgt = gt_file['image'][()]
+
+                with h5py.File(abs_dir, 'r') as file:
+                    Xma = file['ma_CT'][()]
+                    Sma = file['ma_sinogram'][()]
+                    XLI = file['LI_CT'][()]
+                    SLI = file['LI_sinogram'][()]
+                    Tr = file['metal_trace'][()]
+
+                # Data processing
+                Sgt = np.asarray(ray_trafo(Xgt))
+                M512 = self.train_mask[:, :, random_mask]
+                M = np.array(Image.fromarray(M512).resize((416, 416), PIL.Image.BILINEAR))
+                Xprior = nmar_prior(XLI, M)
+
+                # Normalization
+                Xprior = normalize(Xprior, image_get_minmax())
+                Xma = normalize(Xma, image_get_minmax())
+                Xgt = normalize(Xgt, image_get_minmax())
+                XLI = normalize(XLI, image_get_minmax())
+                Sma = normalize(Sma, proj_get_minmax())
+                Sgt = normalize(Sgt, proj_get_minmax())
+                SLI = normalize(SLI, proj_get_minmax())
+                Tr = 1 - Tr.astype(np.float32)
+                Tr = np.transpose(np.expand_dims(Tr, 2), (2, 0, 1))
+                Mask = M.astype(np.float32)
+                Mask = np.transpose(np.expand_dims(Mask, 2), (2, 0, 1))
+
+                return (torch.Tensor(Xma), torch.Tensor(XLI), torch.Tensor(Xgt),
+                        torch.Tensor(Mask), torch.Tensor(Sma), torch.Tensor(SLI),
+                        torch.Tensor(Sgt), torch.Tensor(Tr), torch.Tensor(Xprior))
+
+            except (OSError, KeyError) as e:
+                print(f"Error processing file: {abs_dir} - {str(e)}")
+                # Try new random index if current one fails
+                idx = random.randint(0, len(self.mat_files) - 1)
+                continue
+
+        # Fallback with zero tensors if all attempts fail
+        dummy_shape = (1, 416, 416)  # Adjust dimensions to match your data
+        return tuple(torch.zeros(dummy_shape) for _ in range(9))

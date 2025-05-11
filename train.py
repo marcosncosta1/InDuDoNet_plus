@@ -14,6 +14,8 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
 import time
+from datetime import timedelta
+
 import matplotlib.pyplot as plt
 import numpy as np
 from tensorboardX import SummaryWriter
@@ -27,7 +29,7 @@ warnings.filterwarnings("ignore")
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 parser = argparse.ArgumentParser()
-parser.add_argument("--data_path", type=str, default="./deep_lesion/", help='txt path to training spa-data')
+parser.add_argument("--data_path", type=str, default="./deeplesion/train", help='txt path to training spa-data')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=0)
 parser.add_argument('--batchSize', type=int, default=1, help='input batch size')
 parser.add_argument('--patchSize', type=int, default=416, help='the height / width of the input image to network')
@@ -66,7 +68,13 @@ def train_model(net,optimizer, scheduler,datasets):
     num_iter_epoch = ceil(num_data / opt.batchSize)
     writer = SummaryWriter(opt.log_dir)
     step = 0
+
+    # add start_time initialization
+    start_time = time.time()
+
     for epoch in range(opt.resume, opt.niter):
+        epoch_start = time.time()
+
         mse_per_epoch = 0
         tic = time.time()
         # train stage
@@ -112,9 +120,17 @@ def train_model(net,optimizer, scheduler,datasets):
             }, save_path_model)
             torch.save(net.state_dict(), os.path.join(opt.model_dir, 'InDuDoNet+_%d.pt' % (epoch + 1)))
         toc = time.time()
-        print('This epoch take time {:.2f}'.format(toc - tic))
+        epoch_time = toc - epoch_start
+        elapsed_time = toc - start_time
+        remaining_epochs = opt.niter - (epoch + 1)
+        estimated_total_time = elapsed_time + (epoch_time * remaining_epochs)
+
+        print(f"This epoch took {epoch_time:.2f} seconds.")
+        print(f"Elapsed time: {str(timedelta(seconds=elapsed_time))}")
+        print(f"Estimated remaining time: {str(timedelta(seconds=(epoch_time * remaining_epochs)))}")
+        print(f"Estimated total time: {str(timedelta(seconds=estimated_total_time))}")
     writer.close()
-    print('Reach the maximal epochs! Finish training')
+    print('Reached the maximal epochs! Finish training')
 
 if __name__ == '__main__':
     def print_network(name, net):

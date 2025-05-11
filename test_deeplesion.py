@@ -19,10 +19,10 @@ warnings.filterwarnings("ignore")
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 parser = argparse.ArgumentParser(description="YU_Test")
-parser.add_argument("--model_dir", type=str, default="models", help='path to model and log files')
+parser.add_argument("--model_dir", type=str, default="models/InDuDoNet+_latest.pt", help='path to model and log files')
 parser.add_argument("--data_path", type=str, default="deeplesion/test/", help='path to training data')
 parser.add_argument("--use_GPU", type=bool, default=True, help='use GPU or not')
-parser.add_argument("--save_path", type=str, default="./test_results/", help='path to training data')
+parser.add_argument("--save_path", type=str, default="./results/deeplesion", help='path to training data')
 parser.add_argument('--num_channel', type=int, default=32, help='the number of dual channels')
 parser.add_argument('--T', type=int, default=4, help='the number of ResBlocks in every ProxNet')
 parser.add_argument('--S', type=int, default=10, help='the number of total iterative stages')
@@ -102,6 +102,7 @@ def nmar_prior(XLI, M):
 param = initialization()
 ray_trafo = build_gemotry(param)
 test_mask = np.load(os.path.join(opt.data_path, 'testmask.npy'))
+
 def test_image(data_path, imag_idx, mask_idx):
     txtdir = os.path.join(data_path, 'test_640geo_dir.txt')
     mat_files = open(txtdir, 'r').readlines()
@@ -148,13 +149,25 @@ def print_network(name, net):
 def main():
     print('Loading model ...\n')
     net = InDuDoNet_plus(opt).cuda()
-    print_network("InDuDoNet", net)
+    print_network("InDuDoNet_plus", net)
     net.load_state_dict(torch.load(opt.model_dir))
     net.eval()
     time_test = 0
     count = 0
-    for imag_idx in range(1):  # for demo
-        print(imag_idx)
+
+    number_of_test_images = 200
+    for imag_idx in range(number_of_test_images):  # for demo keep this 1
+        print(f"Processing image {imag_idx + 1}/{number_of_test_images}")  # on demo mode keep this (imag_idx)
+
+        # Create image-specific subdirectories
+        img_folder = f"img_{imag_idx + 1:03d}"
+        xma_subdir = os.path.join(input_dir, img_folder)
+        xgt_subdir = os.path.join(gt_dir, img_folder)
+        x_subdir = os.path.join(outX_dir, img_folder)
+
+        for subdir in [xma_subdir, xgt_subdir, x_subdir]:
+            os.makedirs(subdir, exist_ok=True)
+
         for mask_idx in range(10):
             Xma, XLI, Xgt, M, Sma, SLI, Sgt, Tr, Xprior = test_image(opt.data_path, imag_idx, mask_idx)
             with torch.no_grad():
@@ -165,19 +178,35 @@ def main():
             end_time = time.time()
             dur_time = end_time - start_time
             time_test += dur_time
-            print('Times: ', dur_time)
+
+            print(f'Time for image {imag_idx + 1}, mask {mask_idx + 1}: {dur_time:.4f}s')
+
+
             Xoutclip = torch.clamp(ListX[-1] / 255.0, 0, 0.5)
             Xgtclip = torch.clamp(Xgt / 255.0, 0, 0.5)
             Xmaclip = torch.clamp(Xma /255.0, 0, 0.5)
             Xoutnorm = Xoutclip / 0.5
             Xmanorm = Xmaclip / 0.5
             Xgtnorm = Xgtclip / 0.5
-            idx = imag_idx *10+ mask_idx  + 1
-            plt.imsave(input_dir + str(idx) + '.png', Xmanorm.data.cpu().numpy().squeeze(), cmap="gray")
-            plt.imsave(gt_dir + str(idx) + '.png', Xgtnorm.data.cpu().numpy().squeeze(), cmap="gray")
-            plt.imsave(outX_dir + str(idx) + '.png', Xoutnorm.data.cpu().numpy().squeeze(), cmap="gray")
+            idx = imag_idx * 10 + mask_idx  + 1
+
+
+            #plt.imsave(input_dir + str(idx) + '.png', Xmanorm.data.cpu().numpy().squeeze(), cmap="gray")
+            #plt.imsave(gt_dir + str(idx) + '.png', Xgtnorm.data.cpu().numpy().squeeze(), cmap="gray")
+            #plt.imsave(outX_dir + str(idx) + '.png', Xoutnorm.data.cpu().numpy().squeeze(), cmap="gray")
+            #count += 1
+
+            mask_name = f"mask_{mask_idx + 1:02d}.png"
+
+            # Save to original directories with combined index
+            plt.imsave(os.path.join(xma_subdir, mask_name), Xmanorm.data.cpu().numpy().squeeze(), cmap="gray")
+            plt.imsave(os.path.join(xgt_subdir, mask_name), Xgtnorm.data.cpu().numpy().squeeze(), cmap="gray")
+            plt.imsave(os.path.join(x_subdir, mask_name), Xoutnorm.data.cpu().numpy().squeeze(), cmap="gray")
+
+
             count += 1
-    print('Avg.time={:.4f}'.format(time_test/count))
+
+    print(f'Average time per image: {time_test / count:.4f}s')
 if __name__ == "__main__":
     main()
 
